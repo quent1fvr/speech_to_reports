@@ -54,7 +54,7 @@ class MistralAnalyzer:
                 Transcript:
                 {transcript}
                 
-                Format your response with the headers 'THEMES:' and 'SUMMARY:' on separate lines."""
+                Format your response in FRENCH with the headers 'THEMES:' and 'SUMMARY:' on separate lines."""
             }
         ]
         
@@ -176,21 +176,39 @@ class AudioProcessor:
             # Convert to absolute path and ensure directory exists
             output_path = os.path.abspath(output_path)
             output_dir = os.path.dirname(output_path)
+            
+            print(f"Attempting to save to: {output_path}")
+            print(f"Creating directory if needed: {output_dir}")
+            
             os.makedirs(output_dir, exist_ok=True)
             
+            # Verify the results dictionary has content
+            if not results or not isinstance(results, dict):
+                raise ValueError(f"Invalid results format: {type(results)}")
+                
+            if "metadata" not in results or "segments" not in results:
+                raise ValueError(f"Missing required keys in results. Keys present: {results.keys()}")
+            
             # Try to save in the specified location
+            print(f"Writing JSON file...")
             with open(output_path, 'w', encoding='utf-8') as f:
                 json.dump(results, f, indent=2, ensure_ascii=False)
+            print(f"Successfully saved to: {output_path}")
             return output_path
-            
-        except PermissionError:
+                
+        except PermissionError as pe:
+            print(f"Permission error when saving to {output_path}")
             # If permission denied, save in user's home directory
             home_dir = str(Path.home())
             new_path = os.path.join(home_dir, 'speech_report_transcript.json')
-            print(f"Permission denied. Saving to: {new_path}")
+            print(f"Attempting to save to alternate location: {new_path}")
             with open(new_path, 'w', encoding='utf-8') as f:
                 json.dump(results, f, indent=2, ensure_ascii=False)
+            print(f"Successfully saved to alternate location: {new_path}")
             return new_path
+        except Exception as e:
+            print(f"Error while saving results: {str(e)}")
+            raise
 
 class TranscriptManager:
     def __init__(self, mistral_api_key: Optional[str] = None):
