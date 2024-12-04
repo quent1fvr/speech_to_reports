@@ -85,8 +85,8 @@ def test_pipeline(audio_path: str, hf_token: str, mistral_api_key: str):
         raise
 
 if __name__ == "__main__":
-    AUDIO_FILE = "/Users/quent1/Documents/speech_report/cadeau-anniversaire-ironie__=1.mp3"
-    HF_TOKEN = "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"
-    MISTRAL_API_KEY = "d8FQhxmLJ3M1kyv84yhkbtEY78HSGQqI"  # Replace with your actual Mistral API key
+    AUDIO_FILE = "/Users/quent1/Documents/speech_report/cadeau--ironie__=1.mp3"
+    HF_TOKEN = ""
+    MISTRAL_API_KEY = ""  # Replace with your actual Mistral API key
     
     test_pipeline(AUDIO_FILE, HF_TOKEN, MISTRAL_API_KEY)
