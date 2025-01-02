@@ -1,26 +1,37 @@
 # app.py
+from utils import patch_streamlit_watcher
+patch_streamlit_watcher()
+
 import streamlit as st
 import os
 from audio_processor import AudioProcessor, TranscriptManager
 from tempfile import NamedTemporaryFile
-
+from config import MISTRAL_API_KEY, HUGGING_FACE_TOKEN
 def main():
-    st.title("Audio Transcription & Report Generator")
+    st.title("Audio Transcription & Report Generator BY HEXAMIND")
     
     # Initialize session state
     if "transcript_manager" not in st.session_state:
         st.session_state.transcript_manager = None
+    
+    # Language selection
+    st.subheader("Language Settings")
+    language = st.selectbox(
+        "Select Audio Language (for transcription and analysis)",
+        options=[
+            ("English", "en"),
+            ("French", "fr"),
+        ],
+        help="This will be used for both speech recognition and report generation",
+        format_func=lambda x: x[0],
+        index=0
+    )[1]  # Get the language code
     
     # File upload
     uploaded_file = st.file_uploader("Upload Audio File", type=['wav', 'mp3'])
     
     if uploaded_file:
         # HuggingFace token input
-        hf_token = st.text_input(
-            "Enter HuggingFace Token (required for speaker diarization)",
-            type="password"
-        )
-        
         if st.button("Process Audio"):
             with st.spinner("Processing audio file..."):
                 # Save uploaded file temporarily
@@ -30,15 +41,18 @@ def main():
                 
                 try:
                     # Process audio
-                    processor = AudioProcessor()
-                    results = processor.process_audio(audio_path, hf_token)
+                    processor = AudioProcessor(language=language)
+                    results = processor.process_audio(audio_path, hf_token=HUGGING_FACE_TOKEN)
                     
                     # Save results
                     output_path = "transcript.json"
                     processor.save_results(results, output_path)
                     
-                    # Initialize transcript manager
-                    st.session_state.transcript_manager = TranscriptManager()
+                    # Initialize transcript manager with language
+                    st.session_state.transcript_manager = TranscriptManager(
+                        mistral_api_key=MISTRAL_API_KEY,
+                        language=language
+                    )
                     st.session_state.transcript_manager.load_transcript(output_path)
                     
                     st.success("Audio processed successfully!")
@@ -78,16 +92,7 @@ def main():
             )
             
             # Report
-            report = st.session_state.transcript_manager.generate_report()
-            st.subheader("Report")
-            st.text_area("Generated Report", report, height=200)
-            
-            st.download_button(
-                label="Download Report",
-                data=report,
-                file_name="report.txt",
-                mime="text/plain"
-            )
+
 
 if __name__ == "__main__":
     main()

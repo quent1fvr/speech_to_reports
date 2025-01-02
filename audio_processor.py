@@ -35,11 +35,22 @@ class MistralAnalyzer:
             "Authorization": f"Bearer {self.api_key}"
         }
     
-    def analyze_discussion(self, transcript: str) -> Tuple[str, str]:
+    def analyze_discussion(self, transcript: str, language: str = "en") -> Tuple[str, str]:
         """
         Analyze the discussion to extract themes and summary
+        Args:
+            transcript: The text transcript to analyze
+            language: Target language code ('en' for English, 'fr' for French, etc.)
         Returns: Tuple of (themes, summary)
         """
+        # Define language-specific headers
+        headers = {
+            "en": ("THEMES:", "SUMMARY:"),
+            "fr": ("THÈMES:", "RÉSUMÉ:"),
+            # Add more languages as needed
+        }
+        theme_header, summary_header = headers.get(language, headers["en"])
+        
         messages = [
             {
                 "role": "system",
@@ -48,13 +59,13 @@ class MistralAnalyzer:
             {
                 "role": "user",
                 "content": f"""Please analyze this transcript and provide two sections:
-                1. THEMES: List the main themes or topics of discussion
-                2. SUMMARY: Provide a concise summary of the key points discussed
+                1. {theme_header} List the main themes or topics of discussion
+                2. {summary_header} Provide a concise summary of the key points discussed
 
                 Transcript:
                 {transcript}
                 
-                Format your response in FRENCH with the headers 'THEMES:' and 'SUMMARY:' on separate lines."""
+                Format your response in {language.upper()} with the headers '{theme_header}' and '{summary_header}' on separate lines."""
             }
         ]
         
@@ -72,8 +83,9 @@ class MistralAnalyzer:
             response.raise_for_status()
             analysis = response.json()["choices"][0]["message"]["content"]
             
-            parts = analysis.split("SUMMARY:")
-            themes = parts[0].replace("THEMES:", "").strip()
+            # Split using the appropriate header for the selected language
+            parts = analysis.split(summary_header)
+            themes = parts[0].replace(theme_header, "").strip()
             summary = parts[1].strip() if len(parts) > 1 else ""
             
             return themes, summary
@@ -82,31 +94,43 @@ class MistralAnalyzer:
             raise RuntimeError(f"Error analyzing transcript with Mistral: {str(e)}")
 
 class AudioProcessor:
-    def __init__(self, device="cuda" if torch.cuda.is_available() else "cpu"):
+    def __init__(self, device=None, language: str = "en"):
+        # Determine the best available device
+        if device is None:
+            if torch.cuda.is_available():
+                device = "cuda"
+
+            else:
+                device = "cpu"
+        
         self.device = device
         self.batch_size = 16 if self.device == "cuda" else 4
         self.compute_type = "float16" if self.device == "cuda" else "int8"
+        self.language = language
+        
+        print(f"Initializing AudioProcessor with device: {self.device}")
         
     def process_audio(self, audio_path: str, hf_token: Optional[str] = None) -> Dict:
         """
         Process audio file through the full pipeline
         """
         try:
-            # 1. Load Audio
+            # 1. Load Audio using whisperx's function (it handles resampling)
             audio = whisperx.load_audio(audio_path)
             
             # 2. Load ASR Model
             model = whisperx.load_model(
-                "small", 
-                self.device,
-                compute_type=self.compute_type
+                "large-v3", 
+                device=self.device,
+                compute_type=self.compute_type,
+                language=self.language
             )
             
             # 3. Transcribe with updated parameters
             result = model.transcribe(
                 audio, 
                 batch_size=self.batch_size,
-                language='en'  # Specify language to avoid auto-detection
+                language=self.language  # Use selected language
             )
             
             # 4. Align Whisper output
@@ -131,7 +155,10 @@ class AudioProcessor:
             diarize_segments = diarize_model(
                 audio,
                 min_speakers=1,
-                max_speakers=10
+                max_speakers=10,
+                min_segments=3,
+                segment_length=10 
+
             )
             
             # 6. Assign word speakers
@@ -198,7 +225,6 @@ class AudioProcessor:
                 
         except PermissionError as pe:
             print(f"Permission error when saving to {output_path}")
-            # If permission denied, save in user's home directory
             home_dir = str(Path.home())
             new_path = os.path.join(home_dir, 'speech_report_transcript.json')
             print(f"Attempting to save to alternate location: {new_path}")
@@ -211,19 +237,19 @@ class AudioProcessor:
             raise
 
 class TranscriptManager:
-    def __init__(self, mistral_api_key: Optional[str] = None):
+    def __init__(self, mistral_api_key: Optional[str] = None, language: str = "en"):
         self.speakers = {}
         self.segments = []
         self.mistral_analyzer = MistralAnalyzer(mistral_api_key) if mistral_api_key else None
         self.themes = ""
         self.summary = ""
+        self.language = language
         
     def load_transcript(self, transcript_path: str):
         """Load transcript from JSON file"""
         with open(transcript_path, 'r', encoding='utf-8') as f:
             data = json.load(f)
             
-        # Initialize speakers
         for speaker_id in data["metadata"]["speakers"]:
             self.speakers[speaker_id] = Speaker(id=speaker_id)
             
@@ -259,36 +285,7 @@ class TranscriptManager:
             raise RuntimeError("Mistral API key not provided. Cannot analyze discussion.")
         
         transcript = self.generate_transcript()
-        self.themes, self.summary = self.mistral_analyzer.analyze_discussion(transcript)
-    
-    def generate_report(self) -> str:
-        """Generate comprehensive meeting report"""
-        total_duration = max(s["end"] for s in self.segments)
-        speaker_times = {}
-        
-        for segment in self.segments:
-            speaker = segment["speaker"]
-            duration = segment["end"] - segment["start"]
-            speaker_times[speaker] = speaker_times.get(speaker, 0) + duration
-            
-        report = []
-        report.append("Meeting Report")
-        report.append(f"Date: {datetime.datetime.now().strftime('%Y-%m-%d')}")
-        report.append(f"Duration: {int(total_duration // 60)} minutes\n")
-        
-        report.append("Participants:")
-        for speaker_id, time in speaker_times.items():
-            speaker = self.speakers.get(speaker_id)
-            name = speaker.full_name if speaker else speaker_id
-            report.append(f"- {name} (Speaking time: {int(time // 60)} minutes)")
-        
-        if self.themes or self.summary:
-            report.append("\nDiscussion Analysis:")
-            if self.themes:
-                report.append("\nMain Themes:")
-                report.append(self.themes)
-            if self.summary:
-                report.append("\nSummary:")
-                report.append(self.summary)
-            
-        return "\n".join(report)
+        self.themes, self.summary = self.mistral_analyzer.analyze_discussion(
+            transcript, 
+            language=self.language
+        )
